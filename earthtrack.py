@@ -25,8 +25,10 @@
 
 # TODO Support Python 2
 
+import sys
 import os
 import socket
+import argparse
 import time
 #import math
 from math import pi, cos, sin, acos, asin
@@ -182,16 +184,25 @@ def rangecircle(ssplat, ssplong, footprint, visibility, greatarc):
 # zoom set by -C || False
 # updateinterval set by -u || 0
 # extra set by -x || ''
-xplanet = True          # xearth if False
-hostname = 'localhost'
-if not hostname:
-    hostname = 'localhost'
-sat2track = ''
+# TODO Add defaults to output
+parser = argparse.ArgumentParser(description='Satellite tracker using PREDICT with xearth/xplanet',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument('-H', dest='hostname', default='localhost', help='Hostname of PREDICT server')
+parser.add_argument('-c', dest='sat2track', help='Satellite to track')
+parser.add_argument('-C', dest='sat2trackzoom', help='Satellite to track w/ zoom')
+parser.add_argument('-u', dest='updateinterval', type=int, default=20, help='Update interval of background in seconds')
+parser.add_argument('-x', dest='extra', default='', help='Extra arguments to pass to xearth/xplanet')
+args = parser.parse_args()
+
+xplanet = False
+if '2' in sys.argv[0]:
+    xplanet = True          # xearth if False
 zoom = False
-updateinterval = 20
-if updateinterval < 5 or updateinterval > 120:
-    updateinterval = 20
-extra = ''
+if args.sat2trackzoom:
+    args.sat2track = args.sat2trackzoom
+    zoom = True
+if args.updateinterval < 5 or args.updateinterval > 120:
+    args.updateinterval = 20
 
 circledrawn = False
 
@@ -222,15 +233,14 @@ try:
                     f.write(line)
 
         callsign, qthlat, qthlong, rest = \
-            send_command("GET_QTH", hostname).split('\n', 3)
+            send_command("GET_QTH", args.hostname).split('\n', 3)
         qthlat = float(qthlat)
         qthlong = convertlong(float(qthlong))
 
         mapcenterlat = qthlat
         mapcenterlong = qthlong
 
-        #print(send_command("GET_LIST", hostname))
-        sats = send_command("GET_LIST", hostname).split('\n')
+        sats = send_command("GET_LIST", args.hostname).split('\n')
         sats = [ sat for sat in sats if sat ] # Remove blank entries
         # XXX Error if list empty
 
@@ -243,7 +253,7 @@ try:
              open(greatarcfile, 'w') as greatarc:
                 print('%8.3f %8.3f "%s"' % (qthlat, qthlong, callsign), file=marker)
                 for sat in sats:
-                    satinfo = send_command("GET_SAT " + sat, hostname)
+                    satinfo = send_command("GET_SAT " + sat, args.hostname)
                     #print(satinfo)
                     # XXX Error if empty response
                     name, slong, slat, az, el, next_event_time, footprint, srange, altitude, velocity, orbitnum, visibility, rest = satinfo.split('\n', 12)
@@ -269,7 +279,7 @@ try:
                     srange = float(srange)
 
                     radius = 50
-                    if sat == sat2track and srange > 0:
+                    if sat == args.sat2track and srange > 0:
                         mapcenterlat = slat
                         mapcenterlong = convertlong(slong)
                         rangecircle(slat, slong, footprint, visibility, greatarc)
@@ -286,7 +296,7 @@ try:
                         print('%8.3f %8.3f "%s" %s' % (slat, slong, name, color), file=marker)
 
                         # Get current time from PREDICT server
-                        current_time = int(send_command("GET_TIME", hostname))
+                        current_time = int(send_command("GET_TIME", args.hostname))
                         # Draw range circle if satellite is in range,
                         # or will be in range within 5 minutes.
                         if xplanet and not zoom and (el >= 0 or (next_event_time - current_time) < 300):
@@ -294,17 +304,17 @@ try:
                             circledrawn = True
         # XXX Do this only if no error
         starttime = int(time.time())
-        cmd = 'xearth -proj orth -grid -night 30 -bigstars 40 -markerfile %s -pos "fixed %f %f" -once %s' % (markerfile, mapcenterlat, mapcenterlong, extra)
+        cmd = 'xearth -proj orth -grid -night 30 -bigstars 40 -markerfile %s -pos "fixed %f %f" -once %s' % (markerfile, mapcenterlat, mapcenterlong, args.extra)
         if xplanet:
             if circledrawn:
-                cmd = 'xplanet -config "%s" -projection orth -latitude %f -longitude %f -radius %d -num_times 1 -starfreq 0.005 %s' % (configfile, mapcenterlat, mapcenterlong, radius, extra)
+                cmd = 'xplanet -config "%s" -projection orth -latitude %f -longitude %f -radius %d -num_times 1 -starfreq 0.005 %s' % (configfile, mapcenterlat, mapcenterlong, radius, args.extra)
             else:
-                cmd = 'xplanet -config "%s" -projection orth -latitude %f -longitude %f -num_times 1 -starfreq 0.005 %s' % (configfile, mapcenterlat, mapcenterlong, extra)
+                cmd = 'xplanet -config "%s" -projection orth -latitude %f -longitude %f -num_times 1 -starfreq 0.005 %s' % (configfile, mapcenterlat, mapcenterlong, args.extra)
         print('Running %s' % (cmd))
         os.system(cmd)
         print('Done.')
         endtime = int(time.time())
-        sleeptime = updateinterval - (endtime-starttime)
+        sleeptime = args.updateinterval - (endtime-starttime)
         if sleeptime > 0:
             time.sleep(sleeptime)
 finally:
